@@ -6,6 +6,7 @@ import (
 	"golang-jwt-project/database"
 	"golang-jwt-project/helpers"
 	"golang-jwt-project/models"
+	"log"
 	"net/http"
 	"time"
 
@@ -14,21 +15,37 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var validate = validator.New()
 var userCollection *mongo.Collection = database.OpenCollection(database.Client, "user")
 
-func HashPassword() {
-
+// * As in our database we can't store User's password as it is as we need to HASH it before saving in DB
+func HashPassword(password string) string {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 14)
+	if err != nil {
+		log.Panic(err)
+	}
+	return string(bytes)
 }
 
-func VerifyPassword() {
+func VerifyPassword(userPassword string, providedPassword string) (bool, string) {
+	err := bcrypt.CompareHashAndPassword([]byte(providedPassword), []byte(userPassword))
+	check := true
+	msg := ""
 
+	if err != nil {
+		msg = fmt.Sprintf("email or password is incorrect")
+		check = false
+	}
+
+	return check, msg
 }
 
+//* GetUsers() function will only be accessible by the ADMIN roles. Because he will be getting entire data of the Users 
 func GetUsers() gin.HandlerFunc {
-	
+
 }
 
 // * This GetUser() is used to fetch UserInformation from db after validating the User Details
@@ -56,6 +73,44 @@ func GetUser() gin.HandlerFunc {
 }
 
 func Login() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+		var user models.User
+		var foundUser models.User
+
+		if err := c.BindJSON(&user); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		err := userCollection.FindOne(ctx, bson.M{"email": user.Email}).Decode(&foundUser)
+		defer cancel()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "email or password is Incorrect"})
+			return
+		}
+
+		passwordIsValid, msg := VerifyPassword(*user.Password, *foundUser.Password)
+		defer cancel()
+		if passwordIsValid != true {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
+			return
+		}
+
+		if foundUser.Email == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "User not found!"})
+			return
+		}
+		//* User is found, lets generate the tokens.
+		token, refreshToken, _ := helpers.GenerateAllTokens(*foundUser.Email, *foundUser.FirstName, *foundUser.LastName, *foundUser.UserType, foundUser.UserId)
+		helpers.UpdateAllTokens(token, refreshToken, foundUser.UserId)
+		err = userCollection.FindOne(ctx, bson.M{"user_id": foundUser.UserId}).Decode(&foundUser)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, foundUser)
+	}
 
 }
 
@@ -84,6 +139,9 @@ func Signup() gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "error occurred while checking email"})
 			return
 		}
+
+		password := HashPassword(*user.Password)
+		user.Password = &password
 
 		countPhone, err := userCollection.CountDocuments(ctx, bson.M{"phone": user.Phone})
 		defer cancel()

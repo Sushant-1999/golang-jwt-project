@@ -1,13 +1,17 @@
 package helpers
 
 import (
+	"context"
 	"golang-jwt-project/database"
 	"log"
 	"os"
 	"time"
 
 	jwt "github.com/dgrijalva/jwt-go"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 //* JWT mechanism basically takes the details that we give. And it basically used Hashing Mechanism and gives us the token. Its just way to store the details in the secured manner. And JWT Tokens also consists of a secret Key  and that key is with us.
@@ -56,4 +60,40 @@ func GenerateAllTokens(email string, firstName string, lastName string, userType
 		return
 	}
 	return token, refreshToken, err
+}
+
+// * Every time we login we will get updated token and refreshToken
+func UpdateAllTokens(signedToken string, signedRefreshToken string, userId string) {
+	var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+
+	var updateObj primitive.D
+
+	updateObj = append(updateObj, bson.E{"token", signedToken})
+	updateObj = append(updateObj, bson.E{"refreshToken", signedRefreshToken})
+
+	UpdatedAt, _ := time.Parse(time.RFC3339, time.Now().Format(time.RFC3339))
+	updateObj = append(updateObj, bson.E{"updatedAt", UpdatedAt})
+
+	//* Now lets update the object in the MongoDB with these tokens and updated Date
+	upsert := true
+	filter := bson.M{"userId": userId}
+	opt := options.UpdateOptions{
+		Upsert: &upsert,
+	}
+	//* Mongo Query to update the collection
+	_, err := userCollection.UpdateOne(
+		ctx,
+		filter,
+		bson.D{
+			{"$set", updateObj},
+		},
+		&opt,
+	)
+
+	defer cancel()
+	if err != nil {
+		log.Panic(err)
+	}
+	return
+
 }
