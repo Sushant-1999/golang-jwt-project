@@ -79,13 +79,13 @@ func GetUsers() gin.HandlerFunc {
 			matchStage, groupStage, projectStage})
 		defer cancel()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "error occured while listing user items"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "error occurred while listing user items"})
 		}
-		var allusers []bson.M
-		if err = result.All(ctx, &allusers); err != nil {
+		var allUsers []bson.M
+		if err = result.All(ctx, &allUsers); err != nil {
 			log.Fatal(err)
 		}
-		c.JSON(http.StatusOK, allusers[0])
+		c.JSON(http.StatusOK, allUsers[0])
 	}
 }
 
